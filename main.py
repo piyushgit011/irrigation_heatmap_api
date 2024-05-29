@@ -1,6 +1,6 @@
 import uvicorn
 from fastapi import FastAPI
-from schemas.irrigationSchema import Irrigation as IRSchema
+from irrigationSchema import Irrigation as IRSchema
 import base64
 import numpy as np
 import json
