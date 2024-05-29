@@ -22,7 +22,7 @@ from matplotlib.path import Path
 from scipy.interpolate import splprep, splev
 from matplotlib.patches import PathPatch
 import io 
-
+from supa import upload_image_to_supabase
 app = FastAPI()
 # app.mount("/static", StaticFiles(directory="static"), name="static")
 @app.get('/')
@@ -80,7 +80,7 @@ async def heat_map(ir: IRSchema):
 
     timestamp = int(time.time())
     filename = f'green_only_heatmap{timestamp}.png'
-    url = upload_to_cloud_from_memory(buf, filename)  # Read bytes from buffer
+    url = upload_image_to_supabase(buf, filename)  # Read bytes from buffer
 
     plt.close(fig)
     buf.close()
