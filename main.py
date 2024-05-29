@@ -12,7 +12,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from pykrige.ok import OrdinaryKriging
 from matplotlib.colors import ListedColormap, BoundaryNorm
-from firebase import upload_to_cloud_from_memory
+# from firebase import upload_to_cloud_from_memory
 import time
 import numpy as np
 import matplotlib.pyplot as plt
