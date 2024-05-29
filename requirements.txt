@@ -1,0 +1,7 @@
+matplotlib
+numpy
+pykrige
+supabase
+fastapi
+uvicorn
+scipy
