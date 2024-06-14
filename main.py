@@ -23,6 +23,9 @@ from scipy.interpolate import splprep, splev
 from matplotlib.patches import PathPatch
 import io 
 from supa import upload_image_to_supabase
+from scipy.interpolate import Rbf, interp2d
+from scipy.ndimage import gaussian_filter
+
 app = FastAPI()
 # app.mount("/static", StaticFiles(directory="static"), name="static")
 @app.get('/')
@@ -34,52 +37,61 @@ i = 0
 async def heat_map(ir: IRSchema):
     cmap = mpl.colors.LinearSegmentedColormap.from_list('my_cmap', ['#E6FFE6', 'green'], 5)
     
-    arr = np.asarray(ir.array)
-    data = arr
-    x = np.arange(data.shape[1])
-    y = np.arange(data.shape[0])
+    data = np.asarray(ir.array)
+    x, y = np.arange(data.shape[1]), np.arange(data.shape[0])
     X, Y = np.meshgrid(x, y)
-
-# Flatten and interpolate as before
     points = np.array([X.flatten(), Y.flatten()]).T
     values = data.flatten()
-    xi = np.linspace(x.min(), x.max(), 500)
-    yi = np.linspace(y.min(), y.max(), 500)
+    xi, yi = np.linspace(x.min(), x.max(), 500), np.linspace(y.min(), y.max(), 500)
     XI, YI = np.meshgrid(xi, yi)
-    zi = griddata(points, values, (XI, YI), method='cubic')
+    interp_spline = interp2d(x, y, data, kind='linear')  # Can change kind to 'linear', 'cubic', etc.
+    zi = interp_spline(xi, yi)
+    zi = gaussian_filter(zi, sigma=3)
 
-# Create custom colormap and normalization
-    vmin, vmax = 7, 30
+    # Custom colormap and normalization
+    vmax = values.max()
+    non_zero_values = values[values!= 0]
+    if non_zero_values.size > 0:
+        vmin = non_zero_values.min() - 1
     norm = Normalize(vmin=vmin, vmax=vmax)
-    colors = ["yellow", "lime" ,"limegreen", "green","darkgreen"]
+    colors = ["yellow","limegreen", "green", "darkgreen"]
     cmap = LinearSegmentedColormap.from_list("custom_cmap", colors, N=256)
+    cmap.set_under('white')
 
-# Define main plot axes to use full width since there's no colorbar
-    fig = plt.figure(figsize=(10, 8))
-    main_axes = fig.add_axes([0.1, 0.1, 0.85, 0.8])  # Adjusted to use more width
-    contourf = main_axes.contourf(XI, YI, zi, levels=np.linspace(vmin, vmax, 256), cmap=cmap, norm=norm)
+    fig, ax = plt.subplots(figsize=(10, 8))
+    ax.contourf(XI, YI, zi, levels=np.linspace(vmin, vmax, 256), cmap=cmap, norm=norm, extend='both')
+    contours = ax.contour(XI, YI, zi, levels=np.linspace(vmin, vmax, 60), colors='none')
 
-# Calculate aspect based on the data ranges
-    aspect_ratio = (yi.max() - yi.min()) / (xi.max() - xi.min())
-    main_axes.set_aspect(aspect_ratio)  # Adjust aspect ratio based on your data range
-    contours = plt.contour(XI, YI, zi, levels=np.linspace(vmin, vmax, 60), colors='none')
-# Remaining plotting and smoothing operations
-# Add your contour and smoothing code here
     for contour_path in contours.collections[0].get_paths():
-      vertices = contour_path.vertices
-      tck, u = splprep([vertices[:, 0], vertices[:, 1]], s=5)  # Increased smoothing factor
-      new_points = splev(np.linspace(0, 1, 1000), tck)  # Increased number of evaluation points
-      smooth_contour = Path(list(zip(new_points[0], new_points[1])), [Path.MOVETO] + [Path.CURVE4] * (len(new_points[0]) - 1))
-      patch = PathPatch(smooth_contour, facecolor='none', edgecolor='grey', linewidth=2)
-      plt.gca().add_patch(patch)
-    main_axes.axis('off')
-    main_axes.invert_yaxis()
+        vertices = contour_path.vertices
+        tck, u = splprep([vertices[:, 0], vertices[:, 1]], s=5)
+        new_points = splev(np.linspace(0, 1, 1000), tck)
+        smooth_contour = Path(list(zip(new_points[0], new_points[1])), [Path.MOVETO] + [Path.CURVE4] * (len(new_points[0]) - 1))
+        patch = PathPatch(smooth_contour, facecolor='none', edgecolor='grey', linewidth=2)
+        ax.add_patch(patch)
+
+    # Finding nonzero data bounds for adjusting the plot limits
+    nonzero_indices = np.nonzero(data)
+    min_x, max_x = x[nonzero_indices[1]].min(), x[nonzero_indices[1]].max()
+    min_y, max_y = y[nonzero_indices[0]].min(), y[nonzero_indices[0]].max()
+    padding = 2
+    min_x, max_x = max(min_x - padding, 0), min(max_x + padding, data.shape[1]-1)
+    min_y, max_y = max(min_y - padding, 0), min(max_y + padding, data.shape[0]-1)
+
+    # Adjust plot limits
+    plt.xlim(xi[max(int(min_x * 499 / (x.max()+1)), 0)], xi[min(int(max_x * 499 / (x.max()+1)), 499)])
+    plt.ylim(yi[max(int(min_y * 499 / (y.max()+1)), 0)], yi[min(int(max_y * 499 / (y.max()+1)), 499)])
+
+    ax.set_aspect('auto')
+    ax.axis('off')
+    ax.invert_yaxis()
+
     buf = io.BytesIO()
     fig.savefig(buf, format='png', bbox_inches='tight', pad_inches=0)
     buf.seek(0)  # Rewind the buffer
 
     timestamp = int(time.time())
-    filename = f'green_only_heatmap{timestamp}.png'
+    filename = f'heatmaps/green_only_heatmap{timestamp}.png'
     url = upload_image_to_supabase(buf, filename)  # Read bytes from buffer
 
     plt.close(fig)
@@ -89,14 +101,14 @@ async def heat_map(ir: IRSchema):
 
     # url = convert_to_url_file('static/green_only_heatmap.png', f'maps/green_only_heatmap{int(time.time())}.png')
 
-    non_zero_indices = np.nonzero(arr)
-    non_zero_values = arr[non_zero_indices]
+    non_zero_indices = np.nonzero(data)
+    non_zero_values = data[non_zero_indices]
     sorted = np.sort(non_zero_values)
     
     lowest_quartile = round(sorted.size/4)
     lowest_quartile_avg = np.average(sorted[:lowest_quartile])
     overall_average = np.average(sorted)
-    du = lowest_quartile_avg/overall_average
+    du = (lowest_quartile_avg/overall_average)*100
     
     # ax = sns.heatmap(arr,cmap=cmap,  cbar=False)
     # fig = ax.get_figure()
@@ -121,4 +133,5 @@ async def heat_map(ir: IRSchema):
 
 
 if __name__ == '__main__':
-    uvicorn.run("main:app", host="0.0.0.0",reload=True, port=4000)
+
+    uvicorn.run(app, host="0.0.0.0", port=4000)
